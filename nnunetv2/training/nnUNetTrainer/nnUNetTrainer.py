@@ -1062,7 +1062,7 @@ class nnUNetTrainer(object):
 
         # handling periodic checkpointing
         current_epoch = self.current_epoch
-        if (current_epoch + 1) % self.save_every == 0 and current_epoch != (self.num_epochs - 1):
+        if current_epoch % self.save_every == 0 or (current_epoch + 1) % self.save_every == 0:
             self.save_checkpoint(join(self.output_folder, f'checkpoint_epoch{current_epoch:04d}.pth'))
             self.save_checkpoint(join(self.output_folder, 'checkpoint_latest.pth'))
 
