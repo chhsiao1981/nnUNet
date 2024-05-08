@@ -64,14 +64,14 @@ class SimpleITKIO(BaseReaderWriter):
             print([i.shape for i in images])
             print('Image files:')
             print(image_fnames)
-            raise RuntimeError()
+            # raise RuntimeError()
         if not self._check_all_same(spacings):
             print('ERROR! Not all input images have the same spacing!')
             print('Spacings:')
             print(spacings)
             print('Image files:')
             print(image_fnames)
-            raise RuntimeError()
+            # raise RuntimeError()
         if not self._check_all_same(origins):
             print('WARNING! Not all input images have the same origin!')
             print('Origins:')
@@ -95,7 +95,7 @@ class SimpleITKIO(BaseReaderWriter):
             print(spacings_for_nnunet)
             print('Image files:')
             print(image_fnames)
-            raise RuntimeError()
+            # raise RuntimeError()
 
         stacked_images = np.vstack(images)
         dict = {
