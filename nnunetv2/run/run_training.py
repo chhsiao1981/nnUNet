@@ -323,7 +323,9 @@ def run_training_entry():
 
     assert args.device in ['cpu', 'cuda', 'mps'], f'-device must be either cpu, mps or cuda. Other devices are not tested/supported. Got: {args.device}.'
 
+    print(f'[INFO] run_training_entry: to monkeypatch_random')
     monkeypatch_random(seed=args.seed, cuda_deterministic=True)
+    print(f'[INFO] run_training_entry: done monkeypatch_random')
 
     if args.device == 'cpu':
         # let's allow torch to use hella threads
