@@ -14,6 +14,28 @@ from nnunetv2.utilities.dataset_name_id_conversion import maybe_convert_to_datas
 from nnunetv2.utilities.find_class_by_name import recursive_find_python_class
 from torch.backends import cudnn
 
+import torch
+import random
+import numpy as np
+
+
+def monkeypatch_random(seed: Optional[int] = None, cuda_deterministic: bool = False) -> None:
+    if seed is None:
+        torch.backends.cudnn.benchmark = True
+        torch.backends.cudnn.deterministic = False
+        return
+
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+
+    if cuda_deterministic:
+        torch.backends.cudnn.benchmark = False
+        torch.backends.cudnn.deterministic = True
+    else:
+        torch.backends.cudnn.benchmark = True
+        torch.backends.cudnn.deterministic = False
+
 
 def find_free_network_port() -> int:
     """Finds a free port on localhost.
@@ -28,23 +50,25 @@ def find_free_network_port() -> int:
     return port
 
 
-def get_trainer_from_args(dataset_name_or_id: Union[int, str],
-                          configuration: str,
-                          fold: int,
-                          trainer_name: str = 'nnUNetTrainer',
-                          plans_identifier: str = 'nnUNetPlans',
-                          use_compressed: bool = False,
-                          device: torch.device = torch.device('cuda')):
+def get_trainer_from_args(
+        dataset_name_or_id: Union[int, str],
+        configuration: str,
+        fold: int,
+        trainer_name: str = 'nnUNetTrainer',
+        plans_identifier: str = 'nnUNetPlans',
+        use_compressed: bool = False,
+        device: torch.device = torch.device('cuda'),
+):
     # load nnunet class and do sanity checks
     nnunet_trainer = recursive_find_python_class(join(nnunetv2.__path__[0], "training", "nnUNetTrainer"),
-                                                trainer_name, 'nnunetv2.training.nnUNetTrainer')
+                                                 trainer_name, 'nnunetv2.training.nnUNetTrainer')
     if nnunet_trainer is None:
         raise RuntimeError(f'Could not find requested nnunet trainer {trainer_name} in '
                            f'nnunetv2.training.nnUNetTrainer ('
                            f'{join(nnunetv2.__path__[0], "training", "nnUNetTrainer")}). If it is located somewhere '
                            f'else, please move it there.')
     assert issubclass(nnunet_trainer, nnUNetTrainer), 'The requested nnunet trainer class must inherit from ' \
-                                                    'nnUNetTrainer'
+        'nnUNetTrainer'
 
     # handle dataset input. If it's an ID we need to convert to int from string
     if dataset_name_or_id.startswith('Dataset'):
@@ -81,7 +105,7 @@ def maybe_load_checkpoint(nnunet_trainer: nnUNetTrainer, continue_training: bool
             expected_checkpoint_file = join(nnunet_trainer.output_folder, 'checkpoint_best.pth')
         if not isfile(expected_checkpoint_file):
             print(f"WARNING: Cannot continue training because there seems to be no checkpoint available to "
-                               f"continue from. Starting a new training...")
+                  f"continue from. Starting a new training...")
             expected_checkpoint_file = None
     elif validation_only:
         expected_checkpoint_file = join(nnunet_trainer.output_folder, 'checkpoint_final.pth')
@@ -107,8 +131,24 @@ def cleanup_ddp():
     dist.destroy_process_group()
 
 
-def run_ddp(rank, dataset_name_or_id, configuration, fold, tr, p, use_compressed, disable_checkpointing, c, val,
-            pretrained_weights, npz, val_with_best, world_size):
+def run_ddp(
+        rank,
+        dataset_name_or_id,
+        configuration,
+        fold,
+        tr,
+        p,
+        use_compressed,
+        disable_checkpointing,
+        c,
+        val,
+        pretrained_weights,
+        npz,
+        val_with_best,
+        world_size,
+        n_epoch: int = 200,
+        save_every: int = 10,
+):
     setup_ddp(rank, world_size)
     torch.cuda.set_device(torch.device('cuda', dist.get_rank()))
 
@@ -117,6 +157,9 @@ def run_ddp(rank, dataset_name_or_id, configuration, fold, tr, p, use_compressed
 
     if disable_checkpointing:
         nnunet_trainer.disable_checkpointing = disable_checkpointing
+
+    nnunet_trainer.num_epochs = n_epoch
+    nnunet_trainer.save_every = save_every
 
     assert not (c and val), f'Cannot set --c and --val flag at the same time. Dummy.'
 
@@ -135,19 +178,23 @@ def run_ddp(rank, dataset_name_or_id, configuration, fold, tr, p, use_compressed
     cleanup_ddp()
 
 
-def run_training(dataset_name_or_id: Union[str, int],
-                 configuration: str, fold: Union[int, str],
-                 trainer_class_name: str = 'nnUNetTrainer',
-                 plans_identifier: str = 'nnUNetPlans',
-                 pretrained_weights: Optional[str] = None,
-                 num_gpus: int = 1,
-                 use_compressed_data: bool = False,
-                 export_validation_probabilities: bool = False,
-                 continue_training: bool = False,
-                 only_run_validation: bool = False,
-                 disable_checkpointing: bool = False,
-                 val_with_best: bool = False,
-                 device: torch.device = torch.device('cuda')):
+def run_training(
+        dataset_name_or_id: Union[str, int],
+        configuration: str, fold: Union[int, str],
+        trainer_class_name: str = 'nnUNetTrainer',
+        plans_identifier: str = 'nnUNetPlans',
+        pretrained_weights: Optional[str] = None,
+        num_gpus: int = 1,
+        use_compressed_data: bool = False,
+        export_validation_probabilities: bool = False,
+        continue_training: bool = False,
+        only_run_validation: bool = False,
+        disable_checkpointing: bool = False,
+        val_with_best: bool = False,
+        device: torch.device = torch.device('cuda'),
+        n_epoch: int = 200,
+        save_every: int = 10,
+):
     if plans_identifier == 'nnUNetPlans':
         print("\n############################\n"
               "INFO: You are using the old nnU-Net default plans. We have updated our recommendations. "
@@ -192,11 +239,21 @@ def run_training(dataset_name_or_id: Union[str, int],
                  nprocs=num_gpus,
                  join=True)
     else:
-        nnunet_trainer = get_trainer_from_args(dataset_name_or_id, configuration, fold, trainer_class_name,
-                                               plans_identifier, use_compressed_data, device=device)
+        nnunet_trainer = get_trainer_from_args(
+            dataset_name_or_id,
+            configuration,
+            fold,
+            trainer_class_name,
+            plans_identifier,
+            use_compressed_data,
+            device=device,
+        )
 
         if disable_checkpointing:
             nnunet_trainer.disable_checkpointing = disable_checkpointing
+
+        nnunet_trainer.num_epochs = n_epoch
+        nnunet_trainer.save_every = save_every
 
         assert not (continue_training and only_run_validation), f'Cannot set --c and --val flag at the same time. Dummy.'
 
@@ -252,12 +309,21 @@ def run_training_entry():
                         help='[OPTIONAL] Set this flag to disable checkpointing. Ideal for testing things out and '
                              'you dont want to flood your hard drive with checkpoints.')
     parser.add_argument('-device', type=str, default='cuda', required=False,
-                    help="Use this to set the device the training should run with. Available options are 'cuda' "
-                         "(GPU), 'cpu' (CPU) and 'mps' (Apple M1/M2). Do NOT use this to set which GPU ID! "
-                         "Use CUDA_VISIBLE_DEVICES=X nnUNetv2_train [...] instead!")
+                        help="Use this to set the device the training should run with. Available options are 'cuda' "
+                        "(GPU), 'cpu' (CPU) and 'mps' (Apple M1/M2). Do NOT use this to set which GPU ID! "
+                        "Use CUDA_VISIBLE_DEVICES=X nnUNetv2_train [...] instead!")
+    parser.add_argument('--n_epoch', type=int, default=200, required=False,
+                        help="number of epochs")
+    parser.add_argument('--save_every', type=int, default=10, required=False,
+                        help="save every")
+    parser.add_argument('--seed', type=int, default=2023, required=False,
+                        help="random seed")
     args = parser.parse_args()
 
     assert args.device in ['cpu', 'cuda', 'mps'], f'-device must be either cpu, mps or cuda. Other devices are not tested/supported. Got: {args.device}.'
+
+    monkeypatch_random(seed=args.seed, cuda_deterministic=True)
+
     if args.device == 'cpu':
         # let's allow torch to use hella threads
         import multiprocessing
@@ -271,9 +337,24 @@ def run_training_entry():
     else:
         device = torch.device('mps')
 
-    run_training(args.dataset_name_or_id, args.configuration, args.fold, args.tr, args.p, args.pretrained_weights,
-                 args.num_gpus, args.use_compressed, args.npz, args.c, args.val, args.disable_checkpointing, args.val_best,
-                 device=device)
+    run_training(
+        args.dataset_name_or_id,
+        args.configuration,
+        args.fold,
+        args.tr,
+        args.p,
+        args.pretrained_weights,
+        args.num_gpus,
+        args.use_compressed,
+        args.npz,
+        args.c,
+        args.val,
+        args.disable_checkpointing,
+        args.val_best,
+        device=device,
+        n_epoch=args.n_epoch,
+        save_every=args.save_every,
+    )
 
 
 if __name__ == '__main__':
