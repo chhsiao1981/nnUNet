@@ -1284,7 +1284,7 @@ class nnUNetTrainer(object):
         compute_gaussian.cache_clear()
 
     def run_training(self):
-        print(f'[INFO] run_training: num_epochs: {self.num_epochs} num_iterations_per_epoch: {self.num_iterations_per_epoch} numTraining: {self.dataset_json['numTraining']} save_every: {self.save_every}')
+        print(f"[INFO] run_training: num_epochs: {self.num_epochs} num_iterations_per_epoch: {self.num_iterations_per_epoch} numTraining: {self.dataset_json['numTraining']} save_every: {self.save_every}")
         self.on_train_start()
 
         for epoch in range(self.current_epoch, self.num_epochs):
