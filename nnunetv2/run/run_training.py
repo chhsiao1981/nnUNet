@@ -20,6 +20,7 @@ import numpy as np
 
 
 def monkeypatch_random(seed: Optional[int] = None, cuda_deterministic: bool = False) -> None:
+    print(f'[INFO] monkeypatch_random: seed: {seed} cuda_deterministic: {cuda_deterministic}')
     if seed is None:
         torch.backends.cudnn.benchmark = True
         torch.backends.cudnn.deterministic = False
